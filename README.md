@@ -20,12 +20,12 @@ Ensure you have Python version >= 3.11 installed.
 
 ```sh
 pip install torch torchvision torchaudio
-pip install transformers accelerate deepspeed peft opencv-python decord datasets tensorboard gradio pillow-heif gpustat timm sentencepiece openai av==12.0.0 qwen_vl_utils liger_kernel numpy==1.24.4
+pip install "transformers<=4.51.3" accelerate deepspeed peft opencv-python decord datasets tensorboard gradio pillow-heif gpustat timm sentencepiece openai av==12.0.0 qwen_vl_utils liger_kernel numpy==1.24.4
 pip install flash-attn --no-build-isolation
 pip install livecc-utils==0.0.2
 ```
 
-We finished all things in ```torch==2.6.0```, ```transformers==4.50.0```, ```liger-kernel==4.50.0```. But other versions should also work. Our full environment is [requirements.txt](requirements.txt).
+We finished all things in ```torch==2.6.0```, ```transformers==4.50.0```, ```liger-kernel==0.5.5```. But other versions should also work. Our full environment is [requirements.txt](requirements.txt).
 
 #### Advanced
 
@@ -39,8 +39,10 @@ pip install insightface onnxruntime-gpu python_speech_features wavfile
 
 #### Gradio Demo
 ```
-python demo/app.py
+python demo/app.py --js_monitor
 ```
+`--js_monitor` is to use javascript video timestamp monitoring (recommend to disable for environments with high latency)
+
 <img width="1503" alt="image" src="https://github.com/user-attachments/assets/9673fe1f-a68e-4995-bb35-d07f5a8c8ffd" />
 
 #### CLI
