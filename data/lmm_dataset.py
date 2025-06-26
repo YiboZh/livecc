@@ -8,7 +8,9 @@ from torchvision.transforms.functional import pil_to_tensor
 from livecc_utils import _read_video_decord_plus, _spatial_resize_video
 from qwen_vl_utils.vision_process import smart_nframes, process_vision_info, FPS, VIDEO_TOTAL_PIXELS, VIDEO_MIN_PIXELS, FPS_MAX_FRAMES, FORCE_QWENVL_VIDEO_READER
 
+import traceback
 logger = logging.get_logger(__name__)
+import pdb
 
 logger.warning(f'{__name__}: {FORCE_QWENVL_VIDEO_READER=}, {FPS_MAX_FRAMES=}, {VIDEO_MIN_PIXELS=}, {VIDEO_TOTAL_PIXELS=}')
 
@@ -17,7 +19,7 @@ class DataArguments:
     annotation_paths: list[str] = field(default_factory=list)
     initial_fps_frames: int = int(FPS) * 3
     streaming_fps_frames: int = int(FPS)
-    with_context: bool = False
+    with_context: str = ""
 
 # --- some utils ---
 def readlastline(path: str):
@@ -35,11 +37,21 @@ def bytes_to_pil(image_bytes):
 
 def get_phrase_before_timestamp(text_stream, timestamp, start_from: int = 0):
     phrase = ''
-    for i, (ws, we, word) in enumerate(text_stream[start_from:]):
-        if timestamp >= we:
-            phrase += ' ' + word.strip()
-        else:
-            break
+    try:
+        if isinstance(text_stream, str):
+            text_stream = json.loads(text_stream)
+        for i, elem in enumerate(text_stream[start_from:]):
+            # check unpack length
+            if not hasattr(elem, '__len__') or len(elem) != 3:
+                print(f"Warning: expected 3 items to unpack, but got {len(elem) if hasattr(elem, '__len__') else 'non-iterable'} at index {start_from + i}: {elem}")
+                break
+            ws, we, word = elem
+            if timestamp >= we:
+                phrase += ' ' + word.strip()
+            else:
+                break
+    except Exception as e:
+        raise ValueError(f"Error in get_phrase_before_timestamp: {e}, {text_stream=}, {timestamp=}, {start_from=}")
     return phrase.strip(), i + start_from
 # --- some utils ---
 
@@ -48,6 +60,7 @@ class LMMDataset(Dataset):
         self, *, annotation_paths: list[str], processor: AutoProcessor, 
         initial_fps_frames: int = DataArguments.initial_fps_frames, streaming_fps_frames: int = DataArguments.streaming_fps_frames, 
         with_context: str = DataArguments.with_context, 
+        root_path: str = "",
         **kwargs
     ):
         super().__init__()
@@ -67,6 +80,7 @@ class LMMDataset(Dataset):
         self.with_context = with_context
         self.initial_fps_frames = initial_fps_frames
         self.streaming_fps_frames = streaming_fps_frames
+        self.root_path = root_path
     
     def load_conversation(self, index):
         annotation_path, seek = self.handles[index]
@@ -112,26 +126,38 @@ class LMMDataset(Dataset):
         # load video in strict fps
         clip, _, clip_pts = _read_video_decord_plus(user_video_dict, return_pts=True, strict_fps=True)
         clip = _spatial_resize_video(clip)
+        # --- handle short clips ---
+        total_frames = len(clip)
+        init_frames = min(self.initial_fps_frames, total_frames)
+        if init_frames == 0:
+            raise ValueError("Loaded video contains no frames.")
 
         # make conversation
-        start_timestamp, end_timestamp = 0, self.initial_fps_frames / FPS
-        
-        phrase, next_start_from = get_phrase_before_timestamp(assistant_text_stream, clip_pts[self.initial_fps_frames - 1])
+        start_timestamp, end_timestamp = 0, init_frames / FPS
+
+        phrase, next_start_from = get_phrase_before_timestamp(
+            assistant_text_stream, clip_pts[init_frames - 1]
+        )
         conversation = [
             {
                 'role': 'user', 'content': [
                     {'type': 'text', 'text': f'Time={start_timestamp:.1f}-{end_timestamp:.1f}s'}, 
-                    {'type': 'video', 'video': clip[:self.initial_fps_frames]},
+                    {'type': 'video', 'video': clip[:init_frames]},
                     user_query_dict,
                 ]
             },
             {'role': 'assistant', 'content': [{'type': 'text', 'text':  phrase + ' ...'}]} # ' ...' denotes the streaming is not ended
         ]
-        frames_list = [clip[:self.initial_fps_frames]]
-        for i in range(self.initial_fps_frames, len(clip), self.streaming_fps_frames):
+        frames_list = [clip[:init_frames]]
+        for i in range(init_frames, total_frames, self.streaming_fps_frames):
             start_timestamp, end_timestamp = i / FPS, (i + self.streaming_fps_frames) / FPS
-            phrase, next_start_from = get_phrase_before_timestamp(assistant_text_stream, clip_pts[i + self.streaming_fps_frames-1], start_from=next_start_from)
-            frames = clip[i:i + self.streaming_fps_frames]
+            timestamp_idx = min(i + self.streaming_fps_frames - 1, total_frames - 1)
+            phrase, next_start_from = get_phrase_before_timestamp(
+                assistant_text_stream,
+                clip_pts[timestamp_idx],
+                start_from=next_start_from,
+            )
+            frames = clip[i : min(i + self.streaming_fps_frames, total_frames)]
             conversation.extend([
                 {
                     'role': 'user', 'content': [
@@ -192,11 +218,12 @@ class LMMDataset(Dataset):
         return inputs
 
     def __getitem__(self, index):
-        max_tries = 100
+        max_tries = 10
         for _ in range(max_tries):
             try:
                 return self.getitem(index)
             except Exception as e:
+                traceback.print_exc()
                 logger.warning(f"Failed {_}-th try to get item {index}: {e}")
                 index = random.randint(0, self.__len__() - 1)
                 logger.warning(f"Retrying to get item {index}")
@@ -217,17 +244,19 @@ if __name__ == "__main__":
     
     dataset = LMMDataset(
         annotation_paths=[
-            'live_whisperx_526k_with_seeks.jsonl', 
-            'llava_video_178k_with_seeks.jsonl', 
+            '/home/qua/Data/reaction_data/output_conversation.jsonl', 
+            # '/home/qua/Data/live_whisperx_100_for_preview.jsonl', 
+            # 'llava_video_178k_with_seeks.jsonl', 
             # 'llava_hound_video_with_seeks.jsonl', 
             # 'llava_ov_multi_image_with_seeks.jsonl', 
             # 'llava_ov_single_image_text_mix_with_seeks.jsonl'
         ], 
         processor=processor,
         with_context=False,
+        root_path='/home/qua/Data/reaction_data',
     )
     from torch.utils.data import DataLoader
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=16, collate_fn=dataset.data_collator)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=32, collate_fn=dataset.data_collator)
     
     for batch in tqdm.tqdm(dataloader):
         pass
