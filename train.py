@@ -4,6 +4,7 @@ from transformers import Trainer, AutoProcessor, HfArgumentParser, TrainingArgum
 
 from models import ModelArguments
 from data.lmm_dataset import DataArguments, LMMDataset
+from utils.special_tokens import ensure_special_tokens
 
 logger = logging.get_logger(__name__)
 
@@ -21,6 +22,7 @@ if __name__ == "__main__":
         processor = AutoProcessor.from_pretrained('Qwen/Qwen2-VL-7B-Instruct', padding_side='right') # Qwen2vl-base processor has some bugs. otherwise we do not need this
     else:
         processor = AutoProcessor.from_pretrained(model_args.pretrained_model_name_or_path, padding_side='right')
+    ensure_special_tokens(processor, model=model)
     train_dataset = LMMDataset(**asdict(data_args), **asdict(training_args), **asdict(model_args), processor=processor)
     Trainer(
         model=model, args=training_args, 

@@ -1,5 +1,6 @@
 import json
 from infer import LiveCCDemoInfer
+from utils.special_tokens import ensure_special_tokens
 
 if __name__ == '__main__':
     model_path = '/orcd/scratch/orcd/002/qua/data/reaction_data/checkpoints/livecc_lr1e-5_20250718_180349/checkpoint-410'
@@ -12,6 +13,7 @@ if __name__ == '__main__':
     tokens = ["<think>", "</think>", "<expr>", "</expr>", "<|im_start|>", "<|im_end|>"]
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_path)
+    ensure_special_tokens(tokenizer)
     token_ids = [tokenizer.encode(token) for token in tokens]
     for i, token in enumerate(tokens):
         print(token, token_ids[i])

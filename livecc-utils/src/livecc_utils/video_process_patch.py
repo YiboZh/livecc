@@ -9,11 +9,37 @@ from torchvision import transforms
 
 os.environ['FORCE_QWENVL_VIDEO_READER'] = 'decord+'
 os.environ['VIDEO_MAX_PIXELS'] = str(int(os.environ.get('VIDEO_MAX_PIXELS', 24576 * 28 * 28))) # increase this for streaming. 24576 * 28 * 28 = 19267584
-import qwen_vl_utils.vision_process
-qwen_vl_utils.vision_process.VIDEO_MIN_PIXELS = int(os.environ.get('VIDEO_MIN_PIXELS', 100 * 28 * 28)) # follow qwen2vl paper
-qwen_vl_utils.vision_process.FPS_MAX_FRAMES = int(os.environ.get('FPS_MAX_FRAMES', 480)) # decrease this for efficiency 
+import qwen_vl_utils.vision_process as qwen_vp
+
+IMAGE_PATCH_SIZE = int(os.environ.get('IMAGE_PATCH_SIZE', 14))
+SPATIAL_MERGE_SIZE = getattr(qwen_vp, "SPATIAL_MERGE_SIZE", 2)
+IMAGE_FACTOR = getattr(qwen_vp, "IMAGE_FACTOR", IMAGE_PATCH_SIZE * SPATIAL_MERGE_SIZE)
+setattr(qwen_vp, "IMAGE_FACTOR", IMAGE_FACTOR)
+
+def _resolve_pixels(attr_name: str, fallback: int) -> int:
+    """Fetch constant from qwen_vl_utils with env override fallback."""
+    value = getattr(qwen_vp, attr_name, fallback)
+    env_value = os.environ.get(attr_name)
+    if env_value is not None:
+        value = int(env_value)
+    setattr(qwen_vp, attr_name, value)
+    return value
+
+VIDEO_MIN_PIXELS = _resolve_pixels(
+    "VIDEO_MIN_PIXELS",
+    getattr(qwen_vp, "VIDEO_MIN_TOKEN_NUM", 128) * IMAGE_FACTOR * IMAGE_FACTOR,
+) # follow qwen2vl paper
+VIDEO_MAX_PIXELS = _resolve_pixels(
+    "VIDEO_MAX_PIXELS",
+    getattr(qwen_vp, "VIDEO_MAX_TOKEN_NUM", 768) * IMAGE_FACTOR * IMAGE_FACTOR,
+)
+VIDEO_TOTAL_PIXELS = _resolve_pixels(
+    "VIDEO_TOTAL_PIXELS",
+    int(getattr(qwen_vp, "MODEL_SEQ_LEN", 8192) * IMAGE_FACTOR * IMAGE_FACTOR * 0.9),
+)
+qwen_vp.FPS_MAX_FRAMES = int(os.environ.get('FPS_MAX_FRAMES', getattr(qwen_vp, "FPS_MAX_FRAMES", 768))) # decrease this for efficiency 
 from qwen_vl_utils.vision_process import (
-    FORCE_QWENVL_VIDEO_READER, VIDEO_TOTAL_PIXELS, FPS_MAX_FRAMES, VIDEO_MIN_PIXELS, VIDEO_MAX_PIXELS, FRAME_FACTOR, IMAGE_FACTOR, FPS,
+    FORCE_QWENVL_VIDEO_READER, FPS_MAX_FRAMES, FRAME_FACTOR, FPS,
     smart_nframes, smart_resize
 )
 
@@ -36,10 +62,11 @@ def _read_video_decord_plus(ele: dict, strict_fps: bool = False, drop_last: bool
         clip_pts if return_pts=True
     """
     video_path = ele["video"]
+    remote_loader = ele.get('remote_loader')
     if os.path.exists(video_path):
         vr = decord.VideoReader(video_path, num_threads=2)
-    elif ele['remote_loader'] is not None:
-        vr = decord.VideoReader(ele['remote_loader'](video_path), num_threads=2)
+    elif remote_loader is not None:
+        vr = decord.VideoReader(remote_loader(video_path), num_threads=2)
     else:
         raise ValueError(f'video_path {video_path} not found')
     video_start = ele.get('video_start', None)
@@ -49,17 +76,76 @@ def _read_video_decord_plus(ele: dict, strict_fps: bool = False, drop_last: bool
     if video_start is not None or video_end is not None:
         vr.get_frame_timestamp(0)
         video_pts = vr._frame_pts[:,1]
-        video_start = video_pts[0] if not video_start else video_start
-        video_end = video_pts[-1] if not video_end else video_end
-        clip_idxs = ((video_start <= video_pts) & (video_pts <= video_end)).nonzero()[0]
+        first_ts = float(video_pts[0])
+        last_ts = float(video_pts[-1])
+        orig_start, orig_end = video_start, video_end
+        adjusted = False
+        if video_start is None:
+            video_start = first_ts
+        else:
+            if video_start < first_ts:
+                video_start = first_ts
+            elif video_start > last_ts:
+                logger.warning(f"{video_path}: requested video_start {video_start:.3f} out of range [{first_ts:.3f}, {last_ts:.3f}], clamping.")
+                video_start = last_ts
+                adjusted = True
+        if video_end is None:
+            video_end = last_ts
+        else:
+            if video_end < first_ts:
+                video_end = first_ts
+            elif video_end > last_ts:
+                logger.warning(f"{video_path}: requested video_end {video_end:.3f} out of range [{first_ts:.3f}, {last_ts:.3f}], clamping.")
+                video_end = last_ts
+                adjusted = True
+        if video_end < video_start:
+            logger.warning(f"{video_path}: video_end {video_end:.3f} < video_start {video_start:.3f}, snapping to start timestamp.")
+            video_end = video_start
+            adjusted = True
+        if orig_start is not None or orig_end is not None:
+            if adjusted:
+                logger.warning(f"{video_path}: adjusted clip window from [{orig_start}, {orig_end}] to [{video_start}, {video_end}].")
+        clip_mask = (video_start <= video_pts) & (video_pts <= video_end)
+        clip_idxs = clip_mask.nonzero()[0]
         clip_pts = video_pts[clip_idxs]
+        if clip_idxs.size == 0:
+            logger.warning(f"{video_path}: no frames found in adjusted clip window, forcing closest available frame.")
+            nearest_idx = int(np.clip(np.searchsorted(video_pts, video_start), 0, len(video_pts) - 1))
+            clip_idxs = np.array([nearest_idx], dtype=int)
+            clip_pts = np.array([video_pts[nearest_idx]], dtype=video_pts.dtype)
         total_frames = len(clip_idxs)
     else:
         total_frames = len(vr)
+
+    if total_frames == 0:
+        raise ValueError(f'video_path {video_path} contains no frames')
+
+    pad_count = 0
+    sampled_frames = 0
     if not strict_fps:
-        nframes = smart_nframes(ele, total_frames=total_frames, video_fps=video_fps)
-        nframes_idxs = np.linspace(0, total_frames - 1, nframes).round().astype(int)
-        clip_idxs = nframes_idxs if clip_idxs is None else clip_idxs[nframes_idxs]
+        if total_frames >= FRAME_FACTOR:
+            try:
+                nframes = smart_nframes(ele, total_frames=total_frames, video_fps=video_fps)
+            except ValueError as exc:
+                logger.warning(f'smart_nframes failed for {video_path} ({exc}), fallback to total_frames={total_frames}')
+                nframes = total_frames
+        else:
+            nframes = total_frames
+        nframes = max(int(nframes), 1)
+        nframes_idxs = np.linspace(0, max(total_frames - 1, 0), nframes).round().astype(int)
+        if clip_idxs is None:
+            clip_idxs = nframes_idxs
+        else:
+            clip_idxs = clip_idxs[nframes_idxs]
+        if clip_pts is not None:
+            clip_pts = clip_pts[nframes_idxs]
+        sampled_frames = len(clip_idxs)
+        pad_count = (FRAME_FACTOR - sampled_frames % FRAME_FACTOR) % FRAME_FACTOR
+        if pad_count and sampled_frames:
+            pad_value = clip_idxs[-1]
+            clip_idxs = np.concatenate([clip_idxs, np.full(pad_count, pad_value, dtype=int)])
+            if clip_pts is not None:
+                clip_pts = np.concatenate([clip_pts, np.full(pad_count, clip_pts[-1], dtype=clip_pts.dtype)])
     else:
         if clip_pts is None: # no video_start/video_end
             vr.get_frame_timestamp(0)
@@ -72,15 +158,30 @@ def _read_video_decord_plus(ele: dict, strict_fps: bool = False, drop_last: bool
             else:
                 expected_timestamps = expected_timestamps[np.linspace(0, len(expected_timestamps) - 1, FPS_MAX_FRAMES).round().astype(int)]
         expected_idxs_for_clip_pts = (expected_timestamps[:, None] <= clip_pts).argmax(axis=1)
-        clip_pts, clip_idxs = clip_pts[expected_idxs_for_clip_pts].tolist(), clip_idxs[expected_idxs_for_clip_pts].tolist()
+        clip_pts = clip_pts[expected_idxs_for_clip_pts].tolist()
+        clip_idxs = clip_idxs[expected_idxs_for_clip_pts].tolist()
+        sampled_frames = len(clip_idxs)
         while len(clip_idxs) % FRAME_FACTOR != 0:
             clip_idxs.append(clip_idxs[-1])
             clip_pts.append(clip_pts[-1])
-    clip = torch.from_numpy(vr.get_batch(clip_idxs).asnumpy()).permute(0, 3, 1, 2)  # Convert to TCHW format
-    sample_fps = len(clip_idxs) / max(total_frames, 1e-6) * video_fps
+        pad_count = len(clip_idxs) - sampled_frames
+
+    if isinstance(clip_idxs, np.ndarray):
+        clip_idx_list = clip_idxs.tolist()
+    else:
+        clip_idx_list = list(clip_idxs)
+    clip = torch.from_numpy(vr.get_batch(clip_idx_list).asnumpy()).permute(0, 3, 1, 2)  # Convert to TCHW format
+    sample_fps = sampled_frames / max(total_frames, 1e-6) * video_fps
+    video_metadata = dict(
+        fps=video_fps,
+        frames_indices=clip_idx_list,
+        total_num_frames=total_frames,
+        video_backend="decord+",
+        padded_frames=pad_count,
+    )
     if return_pts:
         return clip, sample_fps, clip_pts
-    return clip, sample_fps
+    return clip, video_metadata, sample_fps
 
 from qwen_vl_utils.vision_process import VIDEO_READER_BACKENDS
 _video_reader_backend = VIDEO_READER_BACKENDS['decord+'] = _read_video_decord_plus

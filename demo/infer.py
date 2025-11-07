@@ -4,6 +4,7 @@ apply_liger_kernel_to_qwen2_vl()
 from transformers import Qwen2VLForConditionalGeneration, AutoProcessor, LogitsProcessor, logging
 from livecc_utils import prepare_multiturn_multimodal_inputs_for_generation, get_smart_resized_clip, get_smart_resized_video_reader, _read_video_decord_plus, _spatial_resize_video
 from qwen_vl_utils import process_vision_info
+from utils.special_tokens import ensure_special_tokens
 
 logger = logging.get_logger(__name__)
 
@@ -47,6 +48,7 @@ class LiveCCDemoInfer:
             attn_implementation='flash_attention_2' if device == 'cuda' else None
         )
         self.processor = AutoProcessor.from_pretrained(model_path, use_fast=False)
+        ensure_special_tokens(self.processor, model=self.model)
         self.streaming_eos_token_id = self.processor.tokenizer(' ...').input_ids[-1]
         self.model.prepare_inputs_for_generation = functools.partial(prepare_multiturn_multimodal_inputs_for_generation, self.model)
         message = {

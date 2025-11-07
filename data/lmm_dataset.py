@@ -6,7 +6,8 @@ from transformers import logging, AutoProcessor
 from torchvision.transforms.functional import pil_to_tensor
 
 from livecc_utils import _read_video_decord_plus, _spatial_resize_video
-from qwen_vl_utils.vision_process import smart_nframes, process_vision_info, FPS, VIDEO_TOTAL_PIXELS, VIDEO_MIN_PIXELS, FPS_MAX_FRAMES, FORCE_QWENVL_VIDEO_READER
+from livecc_utils.video_process_patch import VIDEO_TOTAL_PIXELS, VIDEO_MIN_PIXELS, FPS_MAX_FRAMES, FORCE_QWENVL_VIDEO_READER
+from qwen_vl_utils.vision_process import smart_nframes, process_vision_info, FPS
 
 import traceback
 logger = logging.get_logger(__name__)
