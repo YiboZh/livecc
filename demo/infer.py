@@ -26,7 +26,7 @@ class LiveCCDemoInfer:
     VIDEO_PLAY_END = object()
     VIDEO_PLAY_CONTINUE = object()
     fps = 2
-    initial_fps_frames = 6
+    initial_fps_frames = 2
     streaming_fps_frames = 2
     initial_time_interval = initial_fps_frames / fps
     streaming_time_interval = streaming_fps_frames / fps
@@ -40,6 +40,7 @@ class LiveCCDemoInfer:
                 device = 'cuda'
             else:
                 device = 'cpu'
+        self.model_path = model_path
         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
             model_path, torch_dtype="auto", 
             device_map=device, 
@@ -164,15 +165,29 @@ class LiveCCDemoInfer:
                 logits_processor = None
             outputs = self.model.generate(
                 **inputs, past_key_values=state.get('past_key_values', None), 
-                return_dict_in_generate=True, do_sample=do_sample, 
+                return_dict_in_generate=True, do_sample=do_sample,
+                output_scores=True,
                 repetition_penalty=repetition_penalty,
                 logits_processor=logits_processor,
-                max_new_tokens=16,
+                max_new_tokens=128,
                 pad_token_id=self.model.config.eos_token_id,
             )
             state['past_key_values'] = outputs.past_key_values
             state['past_ids'] = outputs.sequences[:, :-1]
-            response = self.processor.decode(outputs.sequences[0, inputs.input_ids.size(1):], skip_special_tokens=True)
+
+            tokens = ["<think>", "</think>", "<expr>", "</expr>", "I", "<|im_end|>"]
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+            token_ids = [tokenizer.convert_tokens_to_ids(token) for token in tokens]
+            # for step, logits in enumerate(outputs.scores):
+            #     probs = torch.softmax(logits, dim=-1)  # (1, vocab_size)
+            #     print(f"-- Generation step {step} --")
+            #     for tok, tid in zip(tokens, token_ids):
+            #         val = probs[0, tid].item()    # 或者 float(probs[0, tid])
+            #         print(f"  {tok:10s} prob = {val}", end='; ')
+            #     print()
+
+            response = self.processor.decode(outputs.sequences[0, inputs.input_ids.size(1):])
             if hf_spaces:
                 light_state = {k: v for k, v in state.items() if k not in ['past_ids', 'past_key_values']}
                 yield (start_timestamp, stop_timestamp), response, light_state

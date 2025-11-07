@@ -8,3 +8,5 @@ __pycache__/
 /asset
 data/tos.py
 evaluation/livesports3kcc/livecc/*/*.json
+*.ipynb
+*.pt

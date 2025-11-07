@@ -1,6 +1,6 @@
 import os, json
 
-path = os.path.join('/home/qua/Data/reaction_data/output_conversation_rewritten.jsonl')
+path = os.path.join('/orcd/scratch/orcd/002/qua/data/reaction_data/output_conversation_rewritten.jsonl')
 
 seeks = [0]
 with open(path, 'rb') as f:

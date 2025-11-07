@@ -17,7 +17,7 @@ logger.warning(f'{__name__}: {FORCE_QWENVL_VIDEO_READER=}, {FPS_MAX_FRAMES=}, {V
 @dataclass
 class DataArguments:
     annotation_paths: list[str] = field(default_factory=list)
-    initial_fps_frames: int = int(FPS) * 3
+    initial_fps_frames: int = int(FPS) * 1
     streaming_fps_frames: int = int(FPS)
     with_context: str = ""
 
@@ -66,12 +66,14 @@ class LMMDataset(Dataset):
         super().__init__()
         self.handles = []
         for annotation_path in annotation_paths:
+            if not annotation_path.endswith('.jsonl'):
+                pdb.set_trace()
             assert annotation_path.endswith('.jsonl'), f"Please organize the annotations in JSONL format, with each data sample on a separate line, and the last line stores the seek indices"
             logger.warning(f'Load {annotation_path}. Please ensure its last line stores the seek indices...')
             seeks = json.loads(readlastline(annotation_path))
             self.handles.extend(zip([annotation_path] * len(seeks), seeks))
             logger.warning(f'Successfully loaded {annotation_path}')
-        if 'Qwen2VL' in processor.__class__.__name__:
+        if 'Qwen' in processor.__class__.__name__:
             self.im_start_id, self.assistant_id, self.newline_id, self.im_end_id = processor.tokenizer(
                 '<|im_start|>assistant\n<|im_end|>').input_ids
         else:
@@ -218,7 +220,7 @@ class LMMDataset(Dataset):
         return inputs
 
     def __getitem__(self, index):
-        max_tries = 10
+        max_tries = 1
         for _ in range(max_tries):
             try:
                 return self.getitem(index)
@@ -238,13 +240,14 @@ class LMMDataset(Dataset):
 
 if __name__ == "__main__":
     from transformers import AutoProcessor, Qwen2VLForConditionalGeneration
-    processor = AutoProcessor.from_pretrained('Qwen/Qwen2-VL-7B-Instruct', padding_side='right') 
+    processor = AutoProcessor.from_pretrained('chenjoya/LiveCC-7B-Base', padding_side='right') 
     # model = Qwen2VLForConditionalGeneration.from_pretrained('Qwen/Qwen2-VL-7B', torch_dtype='auto', attn_implementation='flash_attention_2', device_map='cuda')
     # model.to('cuda')
     
     dataset = LMMDataset(
         annotation_paths=[
-            '/home/qua/Data/reaction_data/output_conversation.jsonl', 
+            '/orcd/scratch/orcd/002/qua/data/reaction_data/output_conversation_rewritten.jsonl',
+            # '/orcd/scratch/orcd/002/qua/data/Live-WhisperX-526K/combined.jsonl', 
             # '/home/qua/Data/live_whisperx_100_for_preview.jsonl', 
             # 'llava_video_178k_with_seeks.jsonl', 
             # 'llava_hound_video_with_seeks.jsonl', 
@@ -253,13 +256,49 @@ if __name__ == "__main__":
         ], 
         processor=processor,
         with_context=False,
-        root_path='/home/qua/Data/reaction_data',
+        # root_path='/home/qua/Data/reaction_data',
     )
     from torch.utils.data import DataLoader
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=32, collate_fn=dataset.data_collator)
-    
-    for batch in tqdm.tqdm(dataloader):
-        pass
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=0, collate_fn=dataset.data_collator)
+
+    # ---- Add sample checking utilities ----
+    # def check_sample(sample, idx, tokenizer):
+    #     bad = False
+    #     for k, v in sample.items():
+    #         if isinstance(v, torch.Tensor) and v.dtype.is_floating_point:
+    #             if not torch.isfinite(v).all():
+    #                 print(f"[❌] Sample {idx}: tensor '{k}' contains non-finite values")
+    #                 bad = True
+    #     if 'labels' in sample:
+    #         # pdb.set_trace()
+    #         labels = sample['labels']
+    #         if (labels == -100).all():
+    #             print(f"[⚠️] Sample {idx}: all labels == -100")
+    #         vocab_size = processor.tokenizer.vocab_size
+    #         max_label = labels.max().item()
+    #         min_label = labels.min().item()
+    #         if max_label >= vocab_size or min_label < -100:
+    #             print(f"[❌] Sample {idx}: labels out of range (min={min_label}, max={max_label}, vocab_size={vocab_size})")
+    #             bad = True
+    #     return bad
+
+    # # ---- Scan dataset for bad samples ----
+    # bad_indices = []
+    # for i in range(len(dataset)):
+    #     try:
+    #         sample = dataset[i]
+    #     except Exception as e:
+    #         print(f"[🚨] Sample {i} raised exception in __getitem__: {e!r}")
+    #         bad_indices.append(i)
+    #         continue
+    #     if check_sample(sample, i, processor.tokenizer):
+    #         bad_indices.append(i)
+    # print("Bad sample indices:", bad_indices)
+    # # Exit after scanning
+    # exit(0)
+
+#    for batch in tqdm.tqdm(dataloader):
+#        pass
     # for i in tqdm.tqdm(range(len(dataset))):
     #     conversation = dataset.__getitem__(i)
         # inputs.to('cuda')
