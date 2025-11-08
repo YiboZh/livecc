@@ -182,6 +182,7 @@ class LMMDataset(Dataset):
 
     def getitem(self, index):
         conversation = self.load_conversation(index)
+        # import pdb; pdb.set_trace()
 
         special_process_for_stream, image_inputs, video_inputs = False, None, None
         for message in conversation:
@@ -200,12 +201,14 @@ class LMMDataset(Dataset):
                 for element in message['content']:
                     special_process_for_stream = 'text_stream' in element
                     break
+        
         if special_process_for_stream:
             conversation, video_inputs = self.preprocess_conversation_stream(conversation)
             image_inputs = None
         else:
             if not video_inputs and not image_inputs:
                 image_inputs, video_inputs = process_vision_info(conversation)
+        
         texts = self.processor.apply_chat_template(conversation, tokenize=False, add_generation_prompt=False, return_tensors='pt')
         inputs = self.processor(
             text=texts,
