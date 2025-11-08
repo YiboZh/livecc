@@ -21,6 +21,7 @@ class DataArguments:
     initial_fps_frames: int = int(FPS) * 1
     streaming_fps_frames: int = int(FPS)
     with_context: str = ""
+    max_dataset_retries: int = 32
 
 # --- some utils ---
 def readlastline(path: str):
@@ -61,6 +62,7 @@ class LMMDataset(Dataset):
         self, *, annotation_paths: list[str], processor: AutoProcessor, 
         initial_fps_frames: int = DataArguments.initial_fps_frames, streaming_fps_frames: int = DataArguments.streaming_fps_frames, 
         with_context: str = DataArguments.with_context, 
+        max_dataset_retries: int = DataArguments.max_dataset_retries,
         root_path: str = "",
         **kwargs
     ):
@@ -84,6 +86,7 @@ class LMMDataset(Dataset):
         self.initial_fps_frames = initial_fps_frames
         self.streaming_fps_frames = streaming_fps_frames
         self.root_path = root_path
+        self.max_dataset_retries = max(1, max_dataset_retries)
     
     def load_conversation(self, index):
         annotation_path, seek = self.handles[index]
@@ -221,7 +224,7 @@ class LMMDataset(Dataset):
         return inputs
 
     def __getitem__(self, index):
-        max_tries = 1
+        max_tries = self.max_dataset_retries
         for _ in range(max_tries):
             try:
                 return self.getitem(index)
