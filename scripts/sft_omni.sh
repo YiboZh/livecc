@@ -22,7 +22,8 @@ learning_rate=1e-5
 run_name="qwen2.5_lr${learning_rate}_$(date +%Y%m%d_%H%M%S)"
 
 WANDB_PROJECT='reactionbench' TOKENIZERS_PARALLELISM=false \
-torchrun --standalone --nnodes=1 --nproc_per_node=4 train_omni.py \
+deepspeed --num_gpus=4 train_omni.py \
+  --deepspeed scripts/deepspeed_zero2.json \
   --output_dir /orcd/scratch/orcd/002/qua/data/reaction_data/checkpoints/$run_name \
   --overwrite_output_dir True \
   --run_name $run_name \
