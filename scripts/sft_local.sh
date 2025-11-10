@@ -4,7 +4,7 @@ export NCCL_DEBUG=INFO
 export NCCL_ASYNC_ERROR_HANDLING=1
 export TORCH_NCCL_BLOCKING_WAIT=1
 
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=0
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 export VIDEO_MIN_PIXELS=39200 # 100*28*28. the minimum visual frame tokens sent to llm is 100
 export FPS_MAX_FRAMES=60 # maximum number of frames for each video (480/60/2 = 4min)
@@ -14,7 +14,7 @@ export VIDEO_MAX_PIXELS=4816896 # 24576*28*28. the maximum overall video tokens 
 # export LD_LIBRARY_PATH=$CUDA_HOME/lib:$LD_LIBRARY_PATH
 learning_rate=1e-5 # sft uses 2e-5 lr
 run_name="qwen2.5_lr${learning_rate}_$(date +%Y%m%d_%H%M%S)"
-WANDB_PROJECT='reactionbench' TOKENIZERS_PARALLELISM=false torchrun --standalone --nproc_per_node=4 train.py \
+WANDB_PROJECT='reactionbench' TOKENIZERS_PARALLELISM=false torchrun --standalone --nproc_per_node=1 train.py \
   --output_dir /orcd/scratch/orcd/002/qua/data/reaction_data/checkpoints/$run_name \
   --overwrite_output_dir True \
   --run_name $run_name \

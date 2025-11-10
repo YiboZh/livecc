@@ -1,10 +1,10 @@
 import soundfile as sf
 
-from transformers import Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniProcessor
+from transformers import Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniProcessor, Qwen2_5OmniThinkerForConditionalGeneration
 from qwen_omni_utils import process_mm_info
 
 # default: Load the model on the available device(s)
-model = Qwen2_5OmniForConditionalGeneration.from_pretrained("/orcd/scratch/seedfund/001/multimodal/qua/huggingface/hub/Qwen2.5-Omni-7B", torch_dtype="auto", device_map="auto")
+model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained("/orcd/scratch/seedfund/001/multimodal/qua/huggingface/hub/Qwen2.5-Omni-7B", torch_dtype="auto", device_map="auto")
 
 # model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
 #     "Qwen/Qwen2.5-Omni-7B",
@@ -66,8 +66,12 @@ inputs = inputs.to(model.device).to(model.dtype)
 import pdb; pdb.set_trace()
 
 # Inference: Generation of the output text and audio
-text_ids = model.generate(**inputs, use_audio_in_video=USE_AUDIO_IN_VIDEO, return_audio=False)
+# text_ids = model.generate(**inputs, use_audio_in_video=USE_AUDIO_IN_VIDEO, return_audio=False)
 
-response = processor.batch_decode(text_ids[:, inputs.input_ids.shape[1]:], skip_special_tokens=True, clean_up_tokenization_spaces=False)
-print("Response Text:")
-print(response)
+
+model(**inputs)
+
+
+# response = processor.batch_decode(text_ids[:, inputs.input_ids.shape[1]:], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+# print("Response Text:")
+# print(response)

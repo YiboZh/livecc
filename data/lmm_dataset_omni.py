@@ -10,7 +10,13 @@ from dataclasses import dataclass, field
 import json, torch, random, tqdm, os, tempfile, hashlib
 from torch.utils.data import Dataset
 from transformers import logging, Qwen2_5OmniProcessor
-from qwen_omni_utils import process_mm_info
+
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from qwen_omni_utils_patch import process_mm_info
+
 import subprocess
 import av
 from concurrent.futures import ThreadPoolExecutor

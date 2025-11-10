@@ -1,22 +1,15 @@
 import os
 from dataclasses import asdict
 
+# ---- Runtime / DDP debug knobs ------------------------------------------------
 DEFAULT_ALLOCATOR_CONFIG = "expandable_segments:True,max_split_size_mb:512"
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", DEFAULT_ALLOCATOR_CONFIG)
+# Helpful when chasing DDP unused-param issues
+os.environ.setdefault("TORCH_DISTRIBUTED_DEBUG", "DETAIL")
 
 import torch
 import transformers
-from transformers import (
-    Trainer,
-    AutoProcessor,
-    AutoModelForCausalLM,
-    HfArgumentParser,
-    TrainingArguments,
-    AutoConfig,
-    logging,
-    Qwen2_5OmniProcessor,
-    Qwen2_5OmniForConditionalGeneration,
-)
+from transformers import Trainer, AutoProcessor, HfArgumentParser, TrainingArguments, AutoConfig, logging, Qwen2_5OmniProcessor, Qwen2_5OmniThinkerForConditionalGeneration
 
 from models import ModelArguments, RuntimeArguments
 from data.lmm_dataset_omni import DataArgumentsOmni, LMMDatasetOmni
@@ -25,6 +18,7 @@ from utils.memory_utils import apply_runtime_env_defaults, run_memory_preflight_
 
 logger = logging.get_logger(__name__)
 
+torch.set_num_threads(4) 
 
 def _maybe_run_memory_preflight(model, dataset, training_args, runtime_args):
     if not runtime_args.run_memory_check:
@@ -69,33 +63,16 @@ if __name__ == "__main__":
     apply_runtime_env_defaults(fail_fast_ddp=runtime_args.fail_fast_ddp)
 
     config = AutoConfig.from_pretrained(model_args.pretrained_model_name_or_path)
-    arch_name = next(iter(config.architectures or []), None)
-    model_cls = getattr(transformers, arch_name, None)
-    if model_cls is None:
-        if config.model_type == "qwen2_5_omni":
-            logger.warning(
-                f"Falling back to Qwen2_5OmniForConditionalGeneration because transformers "
-                f"does not expose '{arch_name}' for this checkpoint."
-            )
-            model_cls = Qwen2_5OmniForConditionalGeneration
-        else:
-            logger.warning(
-                f"Falling back to AutoModelForCausalLM because transformers "
-                f"does not expose '{arch_name}' for this checkpoint."
-            )
-            model_cls = AutoModelForCausalLM
-
-    model = model_cls.from_pretrained(
+    model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
         model_args.pretrained_model_name_or_path,
         torch_dtype="auto",
         attn_implementation="flash_attention_2",
     )
     
-    # import pdb; pdb.set_trace()
     
-    for module_name in model_args.freeze_modules:
-        logger.warning(f"Freezing module {module_name}")
-        getattr(model, module_name).requires_grad_(False)
+    # for module_name in model_args.freeze_modules:
+    #     logger.warning(f"Freezing module {module_name}")
+    #     getattr(model, module_name).requires_grad_(False)
 
     # if "Qwen2VL" in model.config.architectures[0]:
     #     processor = AutoProcessor.from_pretrained(
@@ -108,8 +85,7 @@ if __name__ == "__main__":
     processor = Qwen2_5OmniProcessor.from_pretrained(
             model_args.pretrained_model_name_or_path, padding_side="right"
         )
-        
-    ensure_special_tokens(processor, model=model)
+    # ensure_special_tokens(processor, model=model)
 
     train_dataset = LMMDatasetOmni(
         **asdict(data_args),
