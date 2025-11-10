@@ -107,6 +107,17 @@ WANDB_PROJECT='joya.chen' TOKENIZERS_PARALLELISM=false torchrun --standalone --n
   --report_to wandb                                                  # Enable logging to Weights & Biases
 ```
 
+To fine-tune with parameter-efficient LoRA adapters, append the following flags (adjust as needed for your model):
+
+```bash
+  --use_lora True \
+  --lora_target_modules "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj" \
+  --lora_r 16 \
+  --lora_alpha 32 \
+  --lora_dropout 0.05 \
+  --modules_to_save "lm_head"
+```
+
 #### SFT
 
 ##### Data

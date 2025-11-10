@@ -220,6 +220,8 @@ class LMMDataset(Dataset):
         labels = torch.full_like(input_ids, fill_value=-100, dtype=input_ids.dtype)
         im_start_idxs = (input_ids == self.im_start_id).nonzero()
         im_end_idxs = (input_ids == self.im_end_id).nonzero()
+        # import pdb; pdb.set_trace()
+        
         for (sample_idx, im_start_idx), (sample_idx, im_end_idx) in zip(im_start_idxs, im_end_idxs):
             if input_ids[sample_idx, im_start_idx + 1] == self.assistant_id:
                 labels[sample_idx, im_start_idx+3:im_end_idx+1] = input_ids[sample_idx, im_start_idx+3:im_end_idx+1]
@@ -230,6 +232,8 @@ class LMMDataset(Dataset):
         max_tries = self.max_dataset_retries
         for _ in range(max_tries):
             try:
+                # import pdb; pdb.set_trace()
+                
                 return self.getitem(index)
             except Exception as e:
                 traceback.print_exc()
@@ -246,14 +250,19 @@ class LMMDataset(Dataset):
         return len(self.handles)
 
 if __name__ == "__main__":
-    from transformers import AutoProcessor, Qwen2VLForConditionalGeneration
-    processor = AutoProcessor.from_pretrained('chenjoya/LiveCC-7B-Base', padding_side='right') 
-    # model = Qwen2VLForConditionalGeneration.from_pretrained('Qwen/Qwen2-VL-7B', torch_dtype='auto', attn_implementation='flash_attention_2', device_map='cuda')
+    from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor
+    from qwen_vl_utils import process_vision_info
+
+    processor = AutoProcessor.from_pretrained('Qwen/Qwen2.5-VL-7B-Instruct', padding_side='right') 
+    tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen2.5-VL-7B-Instruct', padding_side='right')
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained('Qwen/Qwen2.5-VL-7B-Instruct', torch_dtype='auto', attn_implementation='flash_attention_2', device_map='cuda')
     # model.to('cuda')
     
     dataset = LMMDataset(
         annotation_paths=[
-            '/orcd/scratch/orcd/002/qua/data/reaction_data/output_conversation_rewritten.jsonl',
+            # "/orcd/scratch/seedfund/001/multimodal/qua_dataset/Live-CC-5M/live_cc_5m_with_seeks_10.jsonl"
+            "/orcd/scratch/seedfund/001/multimodal/qua_dataset/Live-CC-5M/live_cc_100_for_preview.jsonl"
+            # '/orcd/scratch/orcd/002/qua/data/reaction_data/output_conversation_rewritten.jsonl',
             # '/orcd/scratch/orcd/002/qua/data/Live-WhisperX-526K/combined.jsonl', 
             # '/home/qua/Data/live_whisperx_100_for_preview.jsonl', 
             # 'llava_video_178k_with_seeks.jsonl', 
@@ -306,8 +315,8 @@ if __name__ == "__main__":
 
 #    for batch in tqdm.tqdm(dataloader):
 #        pass
-    # for i in tqdm.tqdm(range(len(dataset))):
-    #     conversation = dataset.__getitem__(i)
-        # inputs.to('cuda')
+    for i in tqdm.tqdm(range(len(dataset))):
+        inputs = dataset.__getitem__(i)
+        # inputs = processor(conversation, return_tensors="pt", padding=True, truncation=True).to('cuda')
         # with torch.inference_mode():
         #     model(**inputs)

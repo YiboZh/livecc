@@ -15,6 +15,7 @@ from utils.memory_utils import apply_runtime_env_defaults, run_memory_preflight_
 
 logger = logging.get_logger(__name__)
 
+torch.set_num_threads(4) 
 
 def _maybe_run_memory_preflight(model, dataset, training_args, runtime_args):
     if not runtime_args.run_memory_check:

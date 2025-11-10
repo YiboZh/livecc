@@ -1,10 +1,5 @@
 # Force training to use GPU 0 only and mitigate CUDA memory fragmentation
-export TORCH_DISTRIBUTED_DEBUG=DETAIL
-export NCCL_DEBUG=INFO
-export NCCL_ASYNC_ERROR_HANDLING=1
-export TORCH_NCCL_BLOCKING_WAIT=1
-
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=2,3
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 export VIDEO_MIN_PIXELS=39200 # 100*28*28. the minimum visual frame tokens sent to llm is 100
 export FPS_MAX_FRAMES=60 # maximum number of frames for each video (480/60/2 = 4min)
@@ -14,7 +9,7 @@ export VIDEO_MAX_PIXELS=4816896 # 24576*28*28. the maximum overall video tokens 
 # export LD_LIBRARY_PATH=$CUDA_HOME/lib:$LD_LIBRARY_PATH
 learning_rate=1e-5 # sft uses 2e-5 lr
 run_name="qwen2.5_lr${learning_rate}_$(date +%Y%m%d_%H%M%S)"
-WANDB_PROJECT='reactionbench' TOKENIZERS_PARALLELISM=false torchrun --standalone --nproc_per_node=4 train.py \
+WANDB_PROJECT='reactionbench' TOKENIZERS_PARALLELISM=false torchrun --standalone --nproc_per_node=2 train_lora.py \
   --output_dir /orcd/scratch/orcd/002/qua/data/reaction_data/checkpoints/$run_name \
   --overwrite_output_dir True \
   --run_name $run_name \
@@ -30,23 +25,23 @@ WANDB_PROJECT='reactionbench' TOKENIZERS_PARALLELISM=false torchrun --standalone
   --lr_scheduler_type constant_with_warmup \
   --num_train_epochs 1 \
   --logging_steps 10 \
-  --save_steps 50 \
+  --save_steps 1000 \
   --save_total_limit 5 \
   --gradient_checkpointing True \
   --max_grad_norm 0.5 \
   --pretrained_model_name_or_path Qwen/Qwen2.5-VL-7B-Instruct \
   --annotation_paths /home/qua/code/reaction/livecc/data/reaction_clean/livecc_reactions_clean.jsonl \
-  --dataloader_num_workers 4 \
-  --freeze_modules visual \
-  --use_liger_kernel True \
+  --dataloader_num_workers 16 \
+  --use_liger_kernel False \
   --bf16 True \
   --report_to wandb \
-  # --use_lora True \
+  --use_lora True \
+  --freeze_modules visual \
+  --ddp_find_unused_parameters False \
+  # Optional: Customize LoRA config (sensible defaults are set in train.py)
   # --lora_r 16 \
   # --lora_alpha 32 \
-  # --lora_dropout 0.05 \
-  # --lora_target_modules "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj" \
-  # --modules_to_save "lm_head"
+  # --lora_target_modules q_proj k_proj v_proj o_proj  # Leave empty for auto-detection
 
 
 # --annotation_paths /orcd/scratch/orcd/002/qua/data/reaction_data/output_conversation_rewritten.jsonl \\

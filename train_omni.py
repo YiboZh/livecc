@@ -6,10 +6,20 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", DEFAULT_ALLOCATOR_CONFIG)
 
 import torch
 import transformers
-from transformers import Trainer, AutoProcessor, HfArgumentParser, TrainingArguments, AutoConfig, logging
+from transformers import (
+    Trainer,
+    AutoProcessor,
+    AutoModelForCausalLM,
+    HfArgumentParser,
+    TrainingArguments,
+    AutoConfig,
+    logging,
+    Qwen2_5OmniProcessor,
+    Qwen2_5OmniForConditionalGeneration,
+)
 
 from models import ModelArguments, RuntimeArguments
-from data.lmm_dataset import DataArguments, LMMDataset
+from data.lmm_dataset_omni import DataArgumentsOmni, LMMDatasetOmni
 from utils.special_tokens import ensure_special_tokens
 from utils.memory_utils import apply_runtime_env_defaults, run_memory_preflight_check
 
@@ -53,32 +63,55 @@ def _maybe_run_memory_preflight(model, dataset, training_args, runtime_args):
         )
 
 
-if __name__ == "git":
-    parser = HfArgumentParser((TrainingArguments, ModelArguments, DataArguments, RuntimeArguments))
+if __name__ == "__main__":
+    parser = HfArgumentParser((TrainingArguments, ModelArguments, DataArgumentsOmni, RuntimeArguments))
     training_args, model_args, data_args, runtime_args = parser.parse_args_into_dataclasses()
     apply_runtime_env_defaults(fail_fast_ddp=runtime_args.fail_fast_ddp)
 
     config = AutoConfig.from_pretrained(model_args.pretrained_model_name_or_path)
-    model = getattr(transformers, config.architectures[0]).from_pretrained(
+    arch_name = next(iter(config.architectures or []), None)
+    model_cls = getattr(transformers, arch_name, None)
+    if model_cls is None:
+        if config.model_type == "qwen2_5_omni":
+            logger.warning(
+                f"Falling back to Qwen2_5OmniForConditionalGeneration because transformers "
+                f"does not expose '{arch_name}' for this checkpoint."
+            )
+            model_cls = Qwen2_5OmniForConditionalGeneration
+        else:
+            logger.warning(
+                f"Falling back to AutoModelForCausalLM because transformers "
+                f"does not expose '{arch_name}' for this checkpoint."
+            )
+            model_cls = AutoModelForCausalLM
+
+    model = model_cls.from_pretrained(
         model_args.pretrained_model_name_or_path,
         torch_dtype="auto",
         attn_implementation="flash_attention_2",
     )
+    
+    # import pdb; pdb.set_trace()
+    
     for module_name in model_args.freeze_modules:
         logger.warning(f"Freezing module {module_name}")
         getattr(model, module_name).requires_grad_(False)
 
-    if "Qwen2VL" in model.config.architectures[0]:
-        processor = AutoProcessor.from_pretrained(
-            "Qwen/Qwen2-VL-7B-Instruct", padding_side="right"
-        )  # Qwen2vl-base processor has some bugs. otherwise we do not need this
-    else:
-        processor = AutoProcessor.from_pretrained(
+    # if "Qwen2VL" in model.config.architectures[0]:
+    #     processor = AutoProcessor.from_pretrained(
+    #         "Qwen/Qwen2-VL-7B-Instruct", padding_side="right"
+    #     )  # Qwen2vl-base processor has some bugs. otherwise we do not need this
+    # else:
+    #     processor = AutoProcessor.from_pretrained(
+    #         model_args.pretrained_model_name_or_path, padding_side="right"
+    #     )
+    processor = Qwen2_5OmniProcessor.from_pretrained(
             model_args.pretrained_model_name_or_path, padding_side="right"
         )
+        
     ensure_special_tokens(processor, model=model)
 
-    train_dataset = LMMDataset(
+    train_dataset = LMMDatasetOmni(
         **asdict(data_args),
         **asdict(training_args),
         **asdict(model_args),
